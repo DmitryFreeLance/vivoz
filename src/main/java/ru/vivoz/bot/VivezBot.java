@@ -370,7 +370,7 @@ public class VivezBot extends TelegramLongPollingBot {
 
         String text = sb.toString();
         for (Long adminId : adminIds) {
-            sendText(adminId, text, null);
+            sendTextSafe(adminId, text, null);
         }
     }
 
@@ -404,6 +404,21 @@ public class VivezBot extends TelegramLongPollingBot {
             execute(message);
         } catch (TelegramApiException e) {
             throw new RuntimeException("Failed to send message", e);
+        }
+    }
+
+    private void sendTextSafe(long chatId, String text, InlineKeyboardMarkup markup) {
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText(text);
+        message.setParseMode("HTML");
+        if (markup != null) {
+            message.setReplyMarkup(markup);
+        }
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            System.err.println("Failed to send admin message to chatId=" + chatId + ": " + e.getMessage());
         }
     }
 
