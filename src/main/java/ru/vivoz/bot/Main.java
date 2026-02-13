@@ -6,6 +6,7 @@ import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.Set;
 
 public class Main {
@@ -24,7 +25,8 @@ public class Main {
         OrderRepository repository = new OrderRepository(dbPath);
         repository.init();
 
-        Set<Long> adminIds = BotUtils.parseAdminIds(adminIdsRaw);
+        Set<Long> adminIds = new HashSet<>(BotUtils.parseAdminIds(adminIdsRaw));
+        adminIds.addAll(repository.loadAdmins());
 
         TelegramBotsApi api = new TelegramBotsApi(DefaultBotSession.class);
         VivezBot bot = new VivezBot(token, username, adminIds, repository);

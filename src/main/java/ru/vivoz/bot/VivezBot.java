@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class VivezBot extends TelegramLongPollingBot {
     private static final String CALLBACK_MENU_HOME = "MENU_HOME";
@@ -24,12 +25,14 @@ public class VivezBot extends TelegramLongPollingBot {
     private static final String CALLBACK_BACK_MENU = "BACK_MENU";
     private static final String CALLBACK_ADMIN_LAST = "ADMIN_LAST";
     private static final String CALLBACK_ADMIN_STATS = "ADMIN_STATS";
+    private static final String CALLBACK_ADMIN_ADD = "ADMIN_ADD";
 
     private final String token;
     private final String username;
     private final Set<Long> adminIds;
     private final OrderRepository repository;
     private final SessionStore sessions = new SessionStore();
+    private final Map<Long, AdminState> adminStates = new ConcurrentHashMap<>();
 
     public VivezBot(String token, String username, Set<Long> adminIds, OrderRepository repository) {
         this.token = token;
@@ -69,16 +72,24 @@ public class VivezBot extends TelegramLongPollingBot {
 
         if ("/start".equalsIgnoreCase(text)) {
             sessions.clear(userId);
+            adminStates.remove(userId);
             sendStart(chatId, userId);
             return;
         }
 
         if ("/admin".equalsIgnoreCase(text)) {
+            adminStates.remove(userId);
             if (isAdmin(userId)) {
                 sendAdminPanel(chatId);
             } else {
                 sendText(chatId, "Нет доступа к админ панели.");
             }
+            return;
+        }
+
+        AdminState adminState = adminStates.get(userId);
+        if (adminState == AdminState.ADD_ADMIN) {
+            handleAddAdminInput(chatId, userId, text);
             return;
         }
 
@@ -109,7 +120,7 @@ public class VivezBot extends TelegramLongPollingBot {
         if ("phone".equals(question.getKey())) {
             String normalizedPhone = normalizePhone(answer);
             if (!isValidPhone(normalizedPhone)) {
-                sendQuestion(chatId, question, "Пожалуйста, укажите номер в формате +79512220053.");
+                sendQuestion(chatId, question, "Пожалуйста, укажите номер в формате: +79992228855");
                 return;
             }
             session.getAnswers().put(question.getKey(), normalizedPhone);
@@ -132,6 +143,7 @@ public class VivezBot extends TelegramLongPollingBot {
 
         if (CALLBACK_BACK_MENU.equals(data)) {
             sessions.clear(userId);
+            adminStates.remove(userId);
             sendStart(chatId, userId);
             return;
         }
@@ -169,6 +181,14 @@ public class VivezBot extends TelegramLongPollingBot {
         if (CALLBACK_ADMIN_STATS.equals(data)) {
             if (isAdmin(userId)) {
                 sendAdminStats(chatId);
+            }
+            return;
+        }
+        if (CALLBACK_ADMIN_ADD.equals(data)) {
+            if (isAdmin(userId)) {
+                startAddAdmin(chatId, userId);
+            } else {
+                sendText(chatId, "Нет доступа к админ панели.");
             }
             return;
         }
@@ -246,8 +266,8 @@ public class VivezBot extends TelegramLongPollingBot {
 
     private InlineKeyboardMarkup buildMenuKeyboard(boolean isAdmin) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        rows.add(List.of(button("🏠 Домашний переезд", CALLBACK_MENU_HOME),
-                button("🏢 Офисный переезд", CALLBACK_MENU_OFFICE)));
+        rows.add(List.of(button("🏠 Домашний переезд", CALLBACK_MENU_HOME)));
+        rows.add(List.of(button("🏢 Офисный переезд", CALLBACK_MENU_OFFICE)));
         rows.add(List.of(button("👷 Только грузчики", CALLBACK_MENU_LOADERS),
                 button("🚚 Только газель", CALLBACK_MENU_GAZELLE)));
         if (isAdmin) {
@@ -281,6 +301,7 @@ public class VivezBot extends TelegramLongPollingBot {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
         rows.add(List.of(button("📋 Последние 5 заявок", CALLBACK_ADMIN_LAST)));
         rows.add(List.of(button("📊 Статистика", CALLBACK_ADMIN_STATS)));
+        rows.add(List.of(button("➕ Добавить администратора", CALLBACK_ADMIN_ADD)));
         rows.add(List.of(button("🔙 В меню", CALLBACK_BACK_MENU)));
         return new InlineKeyboardMarkup(rows);
     }
@@ -297,6 +318,39 @@ public class VivezBot extends TelegramLongPollingBot {
                 "Всего заявок: " + repository.countAll() + "\n" +
                 "Сегодня: " + repository.countToday();
         sendText(chatId, text, buildAdminKeyboard());
+    }
+
+    private void startAddAdmin(long chatId, long userId) {
+        sessions.clear(userId);
+        adminStates.put(userId, AdminState.ADD_ADMIN);
+        sendText(chatId, "Введите tg_id нового администратора:", buildBackMenuKeyboard());
+    }
+
+    private void handleAddAdminInput(long chatId, long userId, String text) {
+        if (!isAdmin(userId)) {
+            adminStates.remove(userId);
+            sendText(chatId, "Нет доступа к админ панели.");
+            return;
+        }
+        String trimmed = text.trim();
+        if (!trimmed.matches("^\\d{5,20}$")) {
+            sendText(chatId, "Неверный формат. Укажите числовой tg_id, например: 123456789", buildBackMenuKeyboard());
+            return;
+        }
+        long newAdminId = Long.parseLong(trimmed);
+        if (adminIds.contains(newAdminId)) {
+            adminStates.remove(userId);
+            sendText(chatId, "Этот tg_id уже является администратором.", buildAdminKeyboard());
+            return;
+        }
+        boolean added = repository.addAdmin(newAdminId, BotUtils.formatCreatedAt(LocalDateTime.now()));
+        adminIds.add(newAdminId);
+        adminStates.remove(userId);
+        if (added) {
+            sendText(chatId, "Администратор добавлен. Попросите его написать /start боту, чтобы он мог получать сообщения.", buildAdminKeyboard());
+        } else {
+            sendText(chatId, "Этот tg_id уже есть в списке администраторов.", buildAdminKeyboard());
+        }
     }
 
     private void sendLastOrders(long chatId) {
@@ -397,6 +451,12 @@ public class VivezBot extends TelegramLongPollingBot {
         return button;
     }
 
+    private InlineKeyboardMarkup buildBackMenuKeyboard() {
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        rows.add(List.of(button("🔙 В меню", CALLBACK_BACK_MENU)));
+        return new InlineKeyboardMarkup(rows);
+    }
+
     private void sendText(long chatId, String text) {
         sendText(chatId, text, null);
     }
@@ -456,5 +516,9 @@ public class VivezBot extends TelegramLongPollingBot {
             normalized = "+7" + normalized.substring(1);
         }
         return normalized;
+    }
+
+    private enum AdminState {
+        ADD_ADMIN
     }
 }

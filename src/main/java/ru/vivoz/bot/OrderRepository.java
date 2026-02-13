@@ -11,8 +11,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public class OrderRepository {
     private static final String JDBC_PREFIX = "jdbc:sqlite:";
@@ -41,8 +43,44 @@ public class OrderRepository {
                         answers_json TEXT
                     )
                     """);
+            statement.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS admin_users (
+                        user_id INTEGER PRIMARY KEY,
+                        added_at TEXT NOT NULL
+                    )
+                    """);
         } catch (SQLException e) {
             throw new RuntimeException("Failed to init database", e);
+        }
+    }
+
+    public Set<Long> loadAdmins() {
+        String sql = "SELECT user_id FROM admin_users";
+        Set<Long> result = new HashSet<>();
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet rs = statement.executeQuery()) {
+            while (rs.next()) {
+                result.add(rs.getLong("user_id"));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to load admins", e);
+        }
+        return result;
+    }
+
+    public boolean addAdmin(long userId, String addedAt) {
+        String sql = """
+                INSERT OR IGNORE INTO admin_users (user_id, added_at)
+                VALUES (?, ?)
+                """;
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, userId);
+            statement.setString(2, addedAt);
+            return statement.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to add admin", e);
         }
     }
 
