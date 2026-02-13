@@ -106,7 +106,16 @@ public class VivezBot extends TelegramLongPollingBot {
             return;
         }
 
-        session.getAnswers().put(question.getKey(), answer);
+        if ("phone".equals(question.getKey())) {
+            String normalizedPhone = normalizePhone(answer);
+            if (!isValidPhone(normalizedPhone)) {
+                sendQuestion(chatId, question, "Пожалуйста, укажите номер в формате +79512220053.");
+                return;
+            }
+            session.getAnswers().put(question.getKey(), normalizedPhone);
+        } else {
+            session.getAnswers().put(question.getKey(), answer);
+        }
         if (session.advance()) {
             Question next = session.currentQuestion();
             sendQuestion(chatId, next, null);
@@ -432,5 +441,20 @@ public class VivezBot extends TelegramLongPollingBot {
         } catch (Exception e) {
             return typeName;
         }
+    }
+
+    private boolean isValidPhone(String phone) {
+        return phone != null && phone.matches("^\\+7\\d{10}$");
+    }
+
+    private String normalizePhone(String phone) {
+        if (phone == null) {
+            return "";
+        }
+        String normalized = phone.replaceAll("[\\s\\-()]+", "").trim();
+        if (normalized.matches("^8\\d{10}$")) {
+            normalized = "+7" + normalized.substring(1);
+        }
+        return normalized;
     }
 }
